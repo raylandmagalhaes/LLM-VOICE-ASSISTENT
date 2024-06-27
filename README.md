@@ -1,1 +1,1 @@
-![Alt text](/relative/path/to/img.jpg?raw=true "Optional Title")
+![Alt text](Screenshot at Jun 26 22-43-45.png?raw=true "Optional Title")
