@@ -14,6 +14,7 @@ import torch
 
 load_dotenv()
 
+
 st.set_page_config(page_title="streamlit_audio_recorder")
 
 #Text to speech model loading
