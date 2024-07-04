@@ -3,15 +3,29 @@ import streamlit as st
 from st_audiorec import st_audiorec
 import speech_recognition as sr
 import textwrap
-from subprocess import Popen, PIPE
 from langchain.llms import OpenAI
 from langchain.agents import load_tools, initialize_agent, AgentType
 from dotenv import load_dotenv
+from parler_tts import ParlerTTSForConditionalGeneration
+from transformers import AutoTokenizer
+import soundfile as sf
+import torch
 
 
 load_dotenv()
 
 st.set_page_config(page_title="streamlit_audio_recorder")
+
+#Text to speech model loading
+device = "cpu"
+if torch.cuda.is_available():
+    device = "cuda:0"
+if torch.xpu.is_available():
+    device = "xpu"
+torch_dtype = torch.float16 if device != "cpu" else torch.float32
+
+model = ParlerTTSForConditionalGeneration.from_pretrained("parler-tts/parler_tts_mini_v0.1").to(device, dtype=torch_dtype)
+tokenizer = AutoTokenizer.from_pretrained("parler-tts/parler_tts_mini_v0.1")
 
 
 def langchain_agent(text):
@@ -24,22 +38,20 @@ def langchain_agent(text):
     result = agent.run(text)
     return result
 
+
 def text_to_speech(text):
-    pwd = load_dotenv("pwd")
-    command = f'echo {pwd} | sudo -S docker run --platform linux/amd64 -v /Users/raylandmagalhaes/spx-data:/data --rm msftspeech/spx spx synthesize --text "{text}" --audio output my-sample.wav'
-    with Popen(command, shell=True, stdin=PIPE, stdout=PIPE, stderr=PIPE, text=True) as process:
-        # Wait for the command to complete and collect its output
-        stdout, stderr = process.communicate()
-        # Optionally, you can check the exit code and print the output
-        if process.returncode == 0:
-            print('Command succeeded:')
-            print(stdout)
-            audio_file = open('/Users/raylandmagalhaes/spx-data/my-sample.wav', 'rb')
-            audio_bytes = audio_file.read()
-            return audio_bytes
-        else:
-            print('Command failed:')
-            print(stderr)
+    prompt = text
+    description = "A female speaker with a slightly low-pitched voice delivers her words quite expressively, in a very confined sounding environment with clear audio quality. She speaks at a normal pace."
+
+    input_ids = tokenizer(description, return_tensors="pt").input_ids.to(device)
+    prompt_input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
+    generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids).to(torch.float32)
+    audio_arr = generation.cpu().numpy().squeeze()
+    sf.write("parler_tts_out.wav", audio_arr, model.config.sampling_rate)
+    audio_file = open('parler_tts_out.wav', 'rb')
+    audio_bytes = audio_file.read()
+    return audio_bytes
+
 
 
 def audio_transcriber_demo_app():
