@@ -28,6 +28,7 @@ model = ParlerTTSForConditionalGeneration.from_pretrained("parler-tts/parler_tts
 tokenizer = AutoTokenizer.from_pretrained("parler-tts/parler_tts_mini_v0.1")
 
 
+
 def langchain_agent(text):
     llm = OpenAI(temperature=0.5)
 
