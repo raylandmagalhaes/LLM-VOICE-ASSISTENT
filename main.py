@@ -1,107 +1,85 @@
-# pip install streamlit-audiorec
+import os
 import streamlit as st
 from st_audiorec import st_audiorec
 import speech_recognition as sr
 import textwrap
-from langchain.llms import OpenAI
-from langchain.agents import load_tools, initialize_agent, AgentType
+from langchain_community.llms import OpenAI
+from langchain.agents import initialize_agent, AgentType
+from langchain_community.agent_toolkits.load_tools import load_tools
 from dotenv import load_dotenv
-from parler_tts import ParlerTTSForConditionalGeneration
-from transformers import AutoTokenizer
-import soundfile as sf
+import types
+from TTS.api import TTS as CoquiTTS
 import torch
 
+os.environ["STREAMLIT_WATCHER_TYPE"] = "none"
 
+# Load environment variables
 load_dotenv()
 
+# Streamlit page config
+st.set_page_config(page_title="Audio Transcriber + TTS")
+if isinstance(torch.classes, types.ModuleType):
+    torch.classes.__path__ = []  # Prevent Streamlit from trying to walk this non-existent path
 
-st.set_page_config(page_title="streamlit_audio_recorder")
+# Load Coqui TTS
+@st.cache_resource(show_spinner="Loading Coqui TTS model...")
+def load_coqui_tts():
+    return CoquiTTS(model_name="tts_models/en/ljspeech/tacotron2-DDC", progress_bar=False, gpu=torch.cuda.is_available())
 
-#Text to speech model loading
-device = "cpu"
-if torch.cuda.is_available():
-    device = "cuda:0"
-if torch.xpu.is_available():
-    device = "xpu"
-torch_dtype = torch.float16 if device != "cpu" else torch.float32
-
-model = ParlerTTSForConditionalGeneration.from_pretrained("parler-tts/parler_tts_mini_v0.1").to(device, dtype=torch_dtype)
-tokenizer = AutoTokenizer.from_pretrained("parler-tts/parler_tts_mini_v0.1")
+coqui_tts = load_coqui_tts()
 
 
 def langchain_agent(text):
     llm = OpenAI(temperature=0.5)
-
     tools = load_tools(["wikipedia"], llm=llm)
-    agent = initialize_agent(
-        tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=True
-    )
-    result = agent.run(text)
-    return result
+    agent = initialize_agent(tools, llm, agent=AgentType.ZERO_SHOT_REACT_DESCRIPTION, verbose=False)
+    return agent.run(text)
 
 
-def text_to_speech(text):
-    prompt = text
-    description = "A female speaker with a slightly low-pitched voice delivers her words quite expressively, in a very confined sounding environment with clear audio quality. She speaks at a normal pace."
-
-    input_ids = tokenizer(description, return_tensors="pt").input_ids.to(device)
-    prompt_input_ids = tokenizer(prompt, return_tensors="pt").input_ids.to(device)
-    generation = model.generate(input_ids=input_ids, prompt_input_ids=prompt_input_ids).to(torch.float32)
-    audio_arr = generation.cpu().numpy().squeeze()
-    sf.write("parler_tts_out.wav", audio_arr, model.config.sampling_rate)
-    audio_file = open('parler_tts_out.wav', 'rb')
-    audio_bytes = audio_file.read()
-    return audio_bytes
-
+def text_to_speech_coqui(text):
+    coqui_tts.tts_to_file(text=text, file_path="coqui_tts_out.wav")
+    with open("coqui_tts_out.wav", "rb") as audio_file:
+        return audio_file.read()
 
 
 def audio_transcriber_demo_app():
-
-    st.title('Audio transcriber')
+    st.title('🎙️ Audio Transcriber + LangChain Agent + Coqui TTS')
 
     wav_audio_data = st_audiorec()
 
-    col_info, col_space = st.columns([0.8, 0.6])
-    with col_info:
-        st.write('\n')  # add vertical spacer
-        st.write('\n')  # add vertical spacer
-
     if wav_audio_data is not None:
-        st.subheader("Audio recorded")
-        # display audio data as received on the Python side
-        col_playback, col_space = st.columns([0.58, 0.42])
-        with col_playback:
-            st.audio(wav_audio_data, format='audio/wav')
-
-        # # Write the bytes data to a temporary WAV file
+        st.subheader("📥 Recorded Audio")
+        st.audio(wav_audio_data, format='audio/wav')
 
         with open("temp.wav", "wb") as f:
             f.write(wav_audio_data)
 
-        # Initialize the recognizer
         recognizer = sr.Recognizer()
 
-        # Transcribe the audio file
         try:
             with sr.AudioFile("temp.wav") as source:
                 audio_data = recognizer.record(source)
                 text = recognizer.recognize_google(audio_data)
-                st.subheader("Transcription: ")
+
+                st.subheader("📝 Transcription")
                 st.text(textwrap.fill(text, width=80))
-                #Generating answer
+
                 response = langchain_agent(text)
-                st.subheader("Answer: ")
+
+                st.subheader("🤖 LangChain Answer")
                 st.text(textwrap.fill(response, width=80))
-                tts_audio = text_to_speech(response)
+
+                with st.spinner("Generating speech with Coqui TTS..."):
+                    tts_audio = text_to_speech_coqui(response)
+
+                st.subheader("🎧 AI Answer Audio")
                 st.audio(tts_audio, format='audio/wav')
 
         except sr.UnknownValueError:
-            print("Google Speech Recognition could not understand audio")
+            st.error("❌ Could not understand the audio.")
         except sr.RequestError as e:
-            print(f"Could not request results from Google Speech Recognition service; {e}")
-
+            st.error(f"❌ Could not request results: {e}")
 
 
 if __name__ == '__main__':
-    # call main function
     audio_transcriber_demo_app()

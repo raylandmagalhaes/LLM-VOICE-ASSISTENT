@@ -1,0 +1,5 @@
+/.env
+/Text-To-Speech.ipynb
+/coqui_tts_out.wav
+/parler_tts_out.wav
+/temp.wav
